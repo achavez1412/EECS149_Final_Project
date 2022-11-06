@@ -1,22 +1,3 @@
-/*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
- *
- *  http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
-
 #include "esp_log.h"
 #include "nvs_flash.h"
 /* BLE */
@@ -27,8 +8,10 @@
 #include "host/util/util.h"
 #include "console/console.h"
 #include "services/gap/ble_svc_gap.h"
+#include "rom/ets_sys.h" // delay
 #include "blecent.h"
 
+// TODO fix these
 #define SENSOR_SVC_UUID 0x32E610892B224DB5A91443CE41986C70
 #define SENSOR_CHR_LED_UUID 0x8911
 
@@ -52,7 +35,8 @@ static void
 blecent_read_write(const struct peer *peer)
 {
     const struct peer_chr *chr;
-    uint8_t value;
+    struct ble_gatt_attr *attr;
+    uint8_t old_value, value;
     int rc;
 
     /* Read the led-state characteristic. */
@@ -65,10 +49,11 @@ blecent_read_write(const struct peer *peer)
         goto err;
     }
 
+    attr = chr->chr.val_handle;
+
     while (1) {
         // READ
-        rc = ble_gattc_read(peer->conn_handle, chr->chr.val_handle,
-                            NULL, NULL);
+        rc = ble_gattc_read(peer->conn_handle, attr, NULL, NULL);
         if (rc != 0) {
             MODLOG_DFLT(ERROR, "Error: Failed to read characteristic; rc=%d\n",
                         rc);
@@ -84,11 +69,9 @@ blecent_read_write(const struct peer *peer)
         }
         MODLOG_DFLT(INFO, "\n");
 
-        /* Write one byte to the led-state
-         * characteristic.
-         */
-    
-        value = !attr->om;
+        // Write one byte to the led-state characteristic.
+        old_value = *(attr->om); // TODO fix this
+        value = !old_value; // TODO fix this
         rc = ble_gattc_write_flat(conn_handle, chr->chr.val_handle,
                                   value, sizeof value, NULL, NULL);
         if (rc != 0) {
@@ -96,6 +79,8 @@ blecent_read_write(const struct peer *peer)
                         rc);
             goto err;
         }
+
+        ets_delay_us(500000); // wait 0.5 seconds
     }
 
     return;
@@ -210,7 +195,7 @@ blecent_should_connect(const struct ble_gap_disc_desc *disc)
     }
 
     /* The device has to advertise support for the Sensor
-     * service (0x0149).
+     * service (0x????).
      */
     for (i = 0; i < fields.num_uuids16; i++) {
         if (ble_uuid_u16(&fields.uuids16[i].u) == SENSOR_SVC_UUID) {
@@ -351,30 +336,6 @@ blecent_gap_event(struct ble_gap_event *event, void *arg)
     case BLE_GAP_EVENT_DISC_COMPLETE:
         MODLOG_DFLT(INFO, "discovery complete; reason=%d\n",
                     event->disc_complete.reason);
-        return 0;
-
-    case BLE_GAP_EVENT_ENC_CHANGE:
-        /* Encryption has been enabled or disabled for this connection. */
-        MODLOG_DFLT(INFO, "encryption change event; status=%d ",
-                    event->enc_change.status);
-        rc = ble_gap_conn_find(event->enc_change.conn_handle, &desc);
-        assert(rc == 0);
-        print_conn_desc(&desc);
-        return 0;
-
-    case BLE_GAP_EVENT_NOTIFY_RX:
-        /* Peer sent us a notification or indication. */
-        MODLOG_DFLT(INFO, "received %s; conn_handle=%d attr_handle=%d "
-                    "attr_len=%d\n",
-                    event->notify_rx.indication ?
-                    "indication" :
-                    "notification",
-                    event->notify_rx.conn_handle,
-                    event->notify_rx.attr_handle,
-                    OS_MBUF_PKTLEN(event->notify_rx.om));
-
-        /* Attribute data is contained in event->notify_rx.om. Use
-         * `os_mbuf_copydata` to copy the data received in notification mbuf */
         return 0;
 
     case BLE_GAP_EVENT_MTU:
