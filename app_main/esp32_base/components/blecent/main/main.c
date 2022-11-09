@@ -536,8 +536,9 @@ app_main(void)
     ESP_ERROR_CHECK(ret);
 
     ESP_ERROR_CHECK(esp_nimble_hci_and_controller_init());
-
+    printf("nimble_port is starting to initialize\n");
     nimble_port_init();
+    printf("nimble has initialized\n");
     /* Configure the host. */
     ble_hs_cfg.reset_cb = blecent_on_reset;
     ble_hs_cfg.sync_cb = blecent_on_sync;
@@ -554,6 +555,8 @@ app_main(void)
     /* XXX Need to have template for store */
     ble_store_config_init();
 
+    printf("hello hello");
     nimble_port_freertos_init(blecent_host_task);
+    printf("bye bye");
 
 }
