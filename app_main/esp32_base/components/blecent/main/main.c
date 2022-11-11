@@ -1,22 +1,3 @@
-/*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
- *
- *  http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
-
 #include "esp_log.h"
 #include "nvs_flash.h"
 /* BLE */
@@ -27,7 +8,12 @@
 #include "host/util/util.h"
 #include "console/console.h"
 #include "services/gap/ble_svc_gap.h"
+//#include "rom/ets_sys.h" // delay
 #include "blecent.h"
+
+// TODO fix these
+#define SENSOR_SVC_UUID 0x32E610892B224DB5A91443CE41986C70
+#define SENSOR_CHR_LED_UUID 0x8911
 
 static const char *tag = "NimBLE_BLE_CENT";
 static int blecent_gap_event(struct ble_gap_event *event, void *arg);
@@ -152,41 +138,53 @@ err:
     return ble_gap_terminate(peer->conn_handle, BLE_ERR_REM_USER_CONN_TERM);
 }
 
+
 /**
- * Performs three GATT operations against the specified peer:
- * 1. Reads the ANS Supported New Alert Category characteristic.
- * 2. After read is completed, writes the ANS Alert Notification Control Point characteristic.
- * 3. After write is completed, subscribes to notifications for the ANS Unread Alert Status
- *    characteristic.
+ * Performs two GATT operations in a loop against the specified peer:
+ * 1. Reads the LED State characteristic.
+ * 2. After read is completed, writes the opposite value back to the characteristic.
  *
  * If the peer does not support a required service, characteristic, or
- * descriptor, then the peer lied when it claimed support for the alert
- * notification service!  When this happens, or if a GATT procedure fails,
+ * descriptor, then the peer lied when it claimed support for the LED
+ * state service!  When this happens, or if a GATT procedure fails,
  * this function immediately terminates the connection.
  */
 static void
 blecent_read_write_subscribe(const struct peer *peer)
 {
     const struct peer_chr *chr;
+    struct ble_gatt_attr *attr;
+    uint8_t old_value, value;
     int rc;
 
-    /* Read the supported-new-alert-category characteristic. */
+    /* Read the led-state characteristic. */
     chr = peer_chr_find_uuid(peer,
-                             BLE_UUID16_DECLARE(BLECENT_SVC_ALERT_UUID),
-                             BLE_UUID16_DECLARE(BLECENT_CHR_SUP_NEW_ALERT_CAT_UUID));
+                             BLE_UUID16_DECLARE(SENSOR_SVC_UUID),
+                             BLE_UUID16_DECLARE(SENSOR_CHR_LED_UUID));
     if (chr == NULL) {
-        MODLOG_DFLT(ERROR, "Error: Peer doesn't support the Supported New "
-                    "Alert Category characteristic\n");
+        MODLOG_DFLT(ERROR, "Error: Peer doesn't support the "
+                    "led-state characteristic\n");
         goto err;
     }
 
-    rc = ble_gattc_read(peer->conn_handle, chr->chr.val_handle,
-                        blecent_on_read, NULL);
+    attr = chr->chr.val_handle;
+
+    // READ
+    rc = ble_gattc_read(peer->conn_handle, attr, NULL, NULL);
     if (rc != 0) {
         MODLOG_DFLT(ERROR, "Error: Failed to read characteristic; rc=%d\n",
                     rc);
         goto err;
     }
+
+    // PRINT
+    MODLOG_DFLT(INFO, "Read complete; status=%d conn_handle=%d", error->status,
+                conn_handle);
+    if (error->status == 0) {
+        MODLOG_DFLT(INFO, " attr_handle=%d value=", attr->handle);
+        print_mbuf(attr->om);
+    }
+    MODLOG_DFLT(INFO, "\n");
 
     return;
 err:
@@ -299,11 +297,11 @@ blecent_should_connect(const struct ble_gap_disc_desc *disc)
         }
     }
 
-    /* The device has to advertise support for the Alert Notification
-     * service (0x1811).
+    /* The device has to advertise support for the Sensor
+     * service (0x????).
      */
     for (i = 0; i < fields.num_uuids16; i++) {
-        if (ble_uuid_u16(&fields.uuids16[i].u) == BLECENT_SVC_ALERT_UUID) {
+        if (ble_uuid_u16(&fields.uuids16[i].u) == SENSOR_SVC_UUID) {
             return 1;
         }
     }
@@ -443,30 +441,6 @@ blecent_gap_event(struct ble_gap_event *event, void *arg)
                     event->disc_complete.reason);
         return 0;
 
-    case BLE_GAP_EVENT_ENC_CHANGE:
-        /* Encryption has been enabled or disabled for this connection. */
-        MODLOG_DFLT(INFO, "encryption change event; status=%d ",
-                    event->enc_change.status);
-        rc = ble_gap_conn_find(event->enc_change.conn_handle, &desc);
-        assert(rc == 0);
-        print_conn_desc(&desc);
-        return 0;
-
-    case BLE_GAP_EVENT_NOTIFY_RX:
-        /* Peer sent us a notification or indication. */
-        MODLOG_DFLT(INFO, "received %s; conn_handle=%d attr_handle=%d "
-                    "attr_len=%d\n",
-                    event->notify_rx.indication ?
-                    "indication" :
-                    "notification",
-                    event->notify_rx.conn_handle,
-                    event->notify_rx.attr_handle,
-                    OS_MBUF_PKTLEN(event->notify_rx.om));
-
-        /* Attribute data is contained in event->notify_rx.om. Use
-         * `os_mbuf_copydata` to copy the data received in notification mbuf */
-        return 0;
-
     case BLE_GAP_EVENT_MTU:
         MODLOG_DFLT(INFO, "mtu update event; conn_handle=%d cid=%d mtu=%d\n",
                     event->mtu.conn_handle,
@@ -536,9 +510,8 @@ app_main(void)
     ESP_ERROR_CHECK(ret);
 
     ESP_ERROR_CHECK(esp_nimble_hci_and_controller_init());
-    printf("nimble_port is starting to initialize\n");
+
     nimble_port_init();
-    printf("nimble has initialized\n");
     /* Configure the host. */
     ble_hs_cfg.reset_cb = blecent_on_reset;
     ble_hs_cfg.sync_cb = blecent_on_sync;
@@ -555,8 +528,6 @@ app_main(void)
     /* XXX Need to have template for store */
     ble_store_config_init();
 
-    printf("hello hello");
     nimble_port_freertos_init(blecent_host_task);
-    printf("bye bye");
 
 }
