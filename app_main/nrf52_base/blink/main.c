@@ -7,31 +7,26 @@
 #include "nrf.h"
 #include "app_util.h"
 #include "simple_ble.h"
-#include "nrf_gpio.h"
-
-// Pin definitions
-#define LED NRF_GPIO_PIN_MAP(0,17)
+#include "nrf_delay.h"
 
 // Intervals for advertising and connections
 static simple_ble_config_t ble_config = {
         // c0:98:e5:45:xx:xx
         .platform_id       = 0x45,    // used as 4th octect in device BLE address
-        .device_id         = 0xAABB,
+        .device_id         = 0x0009,
         .adv_name          = "SENSOR_14A", // used in advertisements if there is room
         .adv_interval      = MSEC_TO_UNITS(1000, UNIT_0_625_MS),
         .min_conn_interval = MSEC_TO_UNITS(500, UNIT_1_25_MS),
         .max_conn_interval = MSEC_TO_UNITS(1000, UNIT_1_25_MS),
 };
 
-// 0x32E610892B224DB5A91443CE41986C70
-// 32E6-1089-2B22-4DB5-A914-43CE-4198-6C70
 static simple_ble_service_t led_service = {{
     .uuid128 = {0x70,0x6C,0x98,0x41,0xCE,0x43,0x14,0xA9,
                 0xB5,0x4D,0x22,0x2B,0x89,0x10,0xE6,0x32}
 }};
 
-static simple_ble_char_t led_state_char = {.uuid16 = 0x8911};
-static uint8_t led_state = 0;
+static simple_ble_char_t led_state_char = {.uuid16 = 0x108a};
+static bool led_state = false;
 
 /*******************************************************************************
  *   State for this application
@@ -39,26 +34,9 @@ static uint8_t led_state = 0;
 // Main application state
 simple_ble_app_t* simple_ble_app;
 
-void ble_evt_write(ble_evt_t const* p_ble_evt) {
-    if (simple_ble_is_char_event(p_ble_evt, &led_state_char)) {
-      printf("Got write to LED characteristic!\n");
-      if (led_state) {
-        printf("Turning on LED!\n");
-        nrf_gpio_pin_clear(LED);
-      } else {
-        printf("Turning off LED!\n");
-        nrf_gpio_pin_set(LED);
-      }
-    }
-}
-
 int main(void) {
 
   // Initialize
-
-  // Setup LED GPIO
-  nrf_gpio_cfg_output(LED);
-  nrf_gpio_pin_set(LED);
 
   // Setup BLE
   simple_ble_app = simple_ble_init(&ble_config);
@@ -73,7 +51,9 @@ int main(void) {
   simple_ble_adv_only_name();
 
   while(1) {
-    power_manage();
+    nrf_delay_ms(500);
+    led_state = !led_state;
+    //power_manage();
   }
 }
 
