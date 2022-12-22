@@ -2,5 +2,5 @@
 	path = gatt_client
 	url = git@github.com:T-recks/gatt_client.git
 [submodule "nrf-service"]
-	path = nrf-service
+	path = nrf_service
 	url = git@github.com:T-recks/nRF5x-custom-ble-service-tutorial.git
